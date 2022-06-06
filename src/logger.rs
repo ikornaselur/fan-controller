@@ -1,4 +1,4 @@
-use log::{Level, Metadata, Record};
+use log::{Metadata, Record};
 
 pub struct Logger;
 
@@ -8,9 +8,7 @@ impl log::Log for Logger {
     }
 
     fn log(&self, record: &Record) {
-        if self.enabled(record.metadata()) {
-            println!("{: >6} - {}", record.level(), record.args());
-        }
+        println!("{: >6} - {}", record.level(), record.args());
     }
 
     fn flush(&self) {}
