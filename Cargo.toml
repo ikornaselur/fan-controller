@@ -1,9 +1,11 @@
 [package]
-name = "cosmere-fan-controller-rs"
+name = "fan-controller"
 version = "0.1.0"
 edition = "2021"
 
 [dependencies]
 ctrlc = { version = "3.2.2", features = ["termination"] }
 log = "0.4.17"
+
+[target.'cfg(target_arch = "aarch64")'.dependencies]
 rppal = "0.13.1"
