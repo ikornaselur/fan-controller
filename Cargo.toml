@@ -1,9 +1,16 @@
 [package]
 name = "fan-controller"
 version = "0.1.0"
+authors = ["Axel <dev@absalon.dev>"]
+description = "A fan controller for Raspberry Pi4, for controlling fans through the hardware PWM channels"
+repository = "https://github.com/ikornaselur/fan-controller"
+license = "MIT"
+readme = "README.md"
 edition = "2021"
 
 [dependencies]
+anyhow = "1.0.57"
+clap = { version = "3.1.18", features = ["derive"] }
 ctrlc = { version = "3.2.2", features = ["termination"] }
 log = "0.4.17"
 

@@ -1,5 +1,5 @@
+use anyhow::Result;
 use log::{debug, info};
-use std::error::Error;
 
 const CYCLES: [(f64, f32, f32); 12] = [
     (0.0, 0.0, 30.0),
@@ -17,13 +17,16 @@ const CYCLES: [(f64, f32, f32); 12] = [
 ];
 const BUFFER: f32 = 0.3;
 
-pub fn get_duty_cycle(cycle_idx: usize, temp: f32) -> Result<(usize, f64), Box<dyn Error>> {
+pub fn get_duty_cycle(cycle_idx: usize, temp: f32) -> Result<(usize, f64)> {
     let (cycle, min_temp, max_temp) = CYCLES[cycle_idx];
 
     if temp >= max_temp {
         // We should move up to next tier
         let new_cycle = CYCLES[cycle_idx + 1].0;
-        info!("Moving up to next tier with {} duty cycle", new_cycle);
+        info!(
+            "Temperature at {}°C. Increasing duty cycle to {}.",
+            temp, new_cycle
+        );
         Ok((cycle_idx + 1, new_cycle))
     } else if temp < min_temp {
         // Check if we're more than 30% into previous cycle before moving, to prevent ping/ponging
@@ -33,7 +36,10 @@ pub fn get_duty_cycle(cycle_idx: usize, temp: f32) -> Result<(usize, f64), Box<d
         let buffer = p_range * BUFFER;
         if temp < min_temp - buffer {
             // We've gone far enough into previous cycle
-            info!("Moving down to previous tier with {} duty cycle", p_cycle);
+            info!(
+                "Temperature at {}°C. Decreasing duty cycle to {}.",
+                temp, p_cycle
+            );
             Ok((cycle_idx - 1, p_cycle))
         } else {
             // We're within the buffer

@@ -1,30 +1,32 @@
+use anyhow::Result;
 use cycle::get_duty_cycle;
 use log::{debug, info, warn};
 use pwm::{Channel, Pwm};
 use std::fs::read_to_string;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-use std::{error::Error, thread, time::Duration};
+use std::{thread, time::Duration};
 
 mod cycle;
 pub mod logger;
-mod pwm;
-
-const SLEEP: Duration = Duration::from_secs(1);
-const FREQUENCY: f64 = 25_000.0; // 25kHz for Noctua fans
-const INITIAL_DUTY_CYCLE: f64 = 1.0;
-const TEMP_PATH: &str = "/sys/class/thermal/thermal_zone0/temp";
+pub mod pwm;
 
 /// Returns the current temperature in celcius
-fn get_temp() -> Result<f32, Box<dyn Error>> {
-    let contents = read_to_string(TEMP_PATH)?;
+fn get_temp(path: &str) -> Result<f32> {
+    let contents = read_to_string(path)?;
     let millicelcius: f32 = contents.trim().parse()?;
     debug!("Temperature read in millicelcius: {}", millicelcius);
 
     Ok(millicelcius / 1000.0)
 }
 
-pub fn fan_loop() -> Result<(), Box<dyn Error>> {
+pub fn fan_loop(
+    channel: Channel,
+    frequency: f64,
+    initial_duty_cycle: f64,
+    temp_path: String,
+    sleep: Duration,
+) -> Result<()> {
     info!("Setting up ctrlc handler");
     let running = Arc::new(AtomicBool::new(true));
     let r = running.clone();
@@ -33,17 +35,17 @@ pub fn fan_loop() -> Result<(), Box<dyn Error>> {
         r.store(false, Ordering::SeqCst);
     })?;
 
-    let pwm = Pwm::new(Channel::Pwm0, FREQUENCY, INITIAL_DUTY_CYCLE)?;
+    let pwm = Pwm::new(channel, frequency, initial_duty_cycle)?;
 
     info!("Starting temperature loop");
     let mut cycle_idx: usize = 0;
     while running.load(Ordering::SeqCst) {
-        let temp = get_temp()?;
+        let temp = get_temp(temp_path.as_str())?;
         let (new_cycle_idx, duty_cycle) = get_duty_cycle(cycle_idx, temp)?;
         cycle_idx = new_cycle_idx;
 
         pwm.set_duty_cycle(duty_cycle)?;
-        thread::sleep(SLEEP);
+        thread::sleep(sleep);
     }
 
     Ok(())

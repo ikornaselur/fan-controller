@@ -1,12 +1,26 @@
+use anyhow::Result;
 use log::debug;
 #[cfg(target_arch = "aarch64")]
 use rppal;
-use std::error::Error;
+use std::fmt;
 
 #[derive(Debug)]
 pub enum Channel {
     Pwm0,
     Pwm1,
+}
+
+impl fmt::Display for Channel {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(
+            f,
+            "Channel PWM{}",
+            match self {
+                Channel::Pwm0 => "0",
+                Channel::Pwm1 => "1",
+            }
+        )
+    }
 }
 
 pub struct Pwm {
@@ -16,7 +30,7 @@ pub struct Pwm {
 
 #[cfg(target_arch = "aarch64")]
 impl Pwm {
-    pub fn new(channel: Channel, frequency: f64, duty_cycle: f64) -> Result<Self, Box<dyn Error>> {
+    pub fn new(channel: Channel, frequency: f64, duty_cycle: f64) -> Result<Self> {
         debug!(
             "Initialising PWM with {:?} {:?} {:?}",
             channel, frequency, duty_cycle
@@ -32,21 +46,21 @@ impl Pwm {
                 duty_cycle,
                 rppal::pwm::Polarity::Normal,
                 true,
-            )
-            .unwrap(),
+            )?,
         })
     }
 
-    pub fn set_duty_cycle(&self, duty_cycle: f64) -> Result<(), Box<dyn Error>> {
+    pub fn set_duty_cycle(&self, duty_cycle: f64) -> Result<()> {
         debug!("Setting duty cycle to {}", duty_cycle);
-        self.rppal_pwm.set_duty_cycle(duty_cycle).unwrap();
-        Ok(())
+        self.rppal_pwm
+            .set_duty_cycle(duty_cycle)
+            .map_err(|err| err.into())
     }
 }
 
 #[cfg(target_arch = "x86_64")]
 impl Pwm {
-    pub fn new(channel: Channel, frequency: f64, duty_cycle: f64) -> Result<Self, Box<dyn Error>> {
+    pub fn new(channel: Channel, frequency: f64, duty_cycle: f64) -> Result<Self> {
         debug!(
             "Creating new fake PWM with {:?} {:?} {:?}",
             channel, frequency, duty_cycle
@@ -54,7 +68,7 @@ impl Pwm {
         Ok(Self {})
     }
 
-    pub fn set_duty_cycle(&self, duty_cycle: f64) -> Result<(), Box<dyn Error>> {
+    pub fn set_duty_cycle(&self, duty_cycle: f64) -> Result<()> {
         debug!("Setting duty cycle to {}", duty_cycle);
         Ok(())
     }
