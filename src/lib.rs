@@ -1,7 +1,6 @@
 use cycle::get_duty_cycle;
 use log::{debug, info, warn};
-#[cfg(target_arch = "aarch64")]
-use rppal::pwm::{Channel, Polarity, Pwm};
+use pwm::{Channel, Pwm};
 use std::fs::read_to_string;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -9,10 +8,11 @@ use std::{error::Error, thread, time::Duration};
 
 mod cycle;
 pub mod logger;
+mod pwm;
 
 const SLEEP: Duration = Duration::from_secs(1);
-#[cfg(target_arch = "aarch64")]
 const FREQUENCY: f64 = 25_000.0; // 25kHz for Noctua fans
+const INITIAL_DUTY_CYCLE: f64 = 1.0;
 const TEMP_PATH: &str = "/sys/class/thermal/thermal_zone0/temp";
 
 /// Returns the current temperature in celcius
@@ -33,9 +33,7 @@ pub fn fan_loop() -> Result<(), Box<dyn Error>> {
         r.store(false, Ordering::SeqCst);
     })?;
 
-    info!("Initialising pwm");
-    #[cfg(target_arch = "aarch64")]
-    let pwm = Pwm::with_frequency(Channel::Pwm0, FREQUENCY, 1.0, Polarity::Normal, true)?;
+    let pwm = Pwm::new(Channel::Pwm0, FREQUENCY, INITIAL_DUTY_CYCLE)?;
 
     info!("Starting temperature loop");
     let mut cycle_idx: usize = 0;
@@ -44,8 +42,6 @@ pub fn fan_loop() -> Result<(), Box<dyn Error>> {
         let (new_cycle_idx, duty_cycle) = get_duty_cycle(cycle_idx, temp)?;
         cycle_idx = new_cycle_idx;
 
-        debug!("Duty cycle: {}", duty_cycle);
-        #[cfg(target_arch = "aarch64")]
         pwm.set_duty_cycle(duty_cycle)?;
         thread::sleep(SLEEP);
     }
