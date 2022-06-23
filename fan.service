@@ -1,0 +1,10 @@
+ [Unit]
+ Description=Fan Controller
+
+ [Service]
+ Type=idle
+ ExecStart=/opt/fan-controller -l INFO
+ KillSignal=SIGINT
+
+ [Install]
+ WantedBy=multi-user.target
