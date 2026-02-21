@@ -1,6 +1,6 @@
 [package]
 name = "fan-controller"
-version = "0.2.0"
+version = "0.3.0"
 authors = ["Axel <dev@absalon.dev>"]
 description = "A fan controller for Raspberry Pi4, for controlling fans through the hardware PWM channels"
 repository = "https://github.com/ikornaselur/fan-controller"
@@ -14,5 +14,5 @@ clap = { version = "3.1.18", features = ["derive"] }
 ctrlc = { version = "3.2.2", features = ["termination"] }
 log = "0.4.17"
 
-[target.'cfg(target_arch = "aarch64")'.dependencies]
+[target.'cfg(all(target_arch = "aarch64", target_os = "linux"))'.dependencies]
 rppal = "0.22.1"

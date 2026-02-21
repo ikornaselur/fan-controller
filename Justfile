@@ -11,3 +11,7 @@ build:
 # Build release binary for Raspberry Pi
 release:
     cargo zigbuild --target {{target}} --release
+
+# Run tests
+test:
+    cargo test --lib

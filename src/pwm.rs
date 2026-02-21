@@ -22,11 +22,11 @@ impl fmt::Display for Channel {
 }
 
 pub struct Pwm {
-    #[cfg(target_arch = "aarch64")]
+    #[cfg(all(target_arch = "aarch64", target_os = "linux"))]
     rppal_pwm: rppal::pwm::Pwm,
 }
 
-#[cfg(target_arch = "aarch64")]
+#[cfg(all(target_arch = "aarch64", target_os = "linux"))]
 impl Pwm {
     /// Find the hardware PWM chip by skipping any firmware-claimed chips.
     fn find_hardware_pwm_chip() -> Result<u8> {
@@ -54,7 +54,8 @@ impl Pwm {
             Channel::Pwm1 => 1,
         };
         let chip = Self::find_hardware_pwm_chip()?;
-        let rppal_pwm = rppal::pwm::Pwm::with_pwmchip(chip, channel_index)?;
+        let mut rppal_pwm = rppal::pwm::Pwm::with_pwmchip(chip, channel_index)?;
+        rppal_pwm.set_reset_on_drop(false);
         rppal_pwm.set_polarity(rppal::pwm::Polarity::Normal)?;
         rppal_pwm.set_frequency(frequency, duty_cycle)?;
         rppal_pwm.enable()?;
@@ -69,7 +70,7 @@ impl Pwm {
     }
 }
 
-#[cfg(target_arch = "x86_64")]
+#[cfg(not(all(target_arch = "aarch64", target_os = "linux")))]
 impl Pwm {
     pub fn new(channel: Channel, frequency: f64, duty_cycle: f64) -> Result<Self> {
         debug!(

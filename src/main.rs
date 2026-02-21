@@ -14,6 +14,11 @@ const DEFAULT_SLEEP: u64 = 1;
 const INITIAL_DUTY_CYCLE: f64 = 1.0;
 const TEMP_PATH: &str = "/sys/class/thermal/thermal_zone0/temp";
 
+const DEFAULT_TARGET_TEMP: f32 = 45.0;
+const DEFAULT_KP: f32 = 0.02;
+const DEFAULT_KI: f32 = 0.001;
+const DEFAULT_KD: f32 = 0.01;
+
 #[derive(Parser, Debug)]
 #[clap(version, about)]
 struct Args {
@@ -40,6 +45,22 @@ struct Args {
     /// Log level
     #[clap(short, long, validator = is_log_level, default_value_t = DEFAULT_LOG_LEVEL.to_string())]
     log_level: String,
+
+    /// Target temperature in °C
+    #[clap(long, default_value_t = DEFAULT_TARGET_TEMP)]
+    target_temp: f32,
+
+    /// PID proportional gain
+    #[clap(long, default_value_t = DEFAULT_KP)]
+    kp: f32,
+
+    /// PID integral gain
+    #[clap(long, default_value_t = DEFAULT_KI)]
+    ki: f32,
+
+    /// PID derivative gain
+    #[clap(long, default_value_t = DEFAULT_KD)]
+    kd: f32,
 }
 
 fn main() -> Result<()> {
@@ -72,6 +93,10 @@ fn main() -> Result<()> {
         args.duty_cycle,
         args.temp_path,
         sleep,
+        args.target_temp,
+        args.kp,
+        args.ki,
+        args.kd,
     )?;
 
     Ok(())
