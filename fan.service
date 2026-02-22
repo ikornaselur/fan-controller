@@ -2,7 +2,7 @@
  Description=Fan Controller
 
  [Service]
- Type=idle
+ Type=simple
  ExecStart=/opt/fan-controller -l INFO
  KillSignal=SIGINT
 
