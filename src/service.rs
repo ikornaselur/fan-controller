@@ -4,7 +4,6 @@ use std::process::Command;
 
 const SERVICE_NAME: &str = "fan-controller";
 const SERVICE_PATH: &str = "/etc/systemd/system/fan-controller.service";
-const INSTALL_DIR: &str = "/usr/local/bin";
 
 fn systemctl(args: &[&str]) -> Result<()> {
     let status = Command::new("systemctl").args(args).status()?;
@@ -14,13 +13,12 @@ fn systemctl(args: &[&str]) -> Result<()> {
     Ok(())
 }
 
-/// Build the ExecStart line from the provided run args.
-fn build_exec_start(args: &[String]) -> String {
-    let binary = format!("{}/{}", INSTALL_DIR, SERVICE_NAME);
+/// Build the ExecStart line using the current binary's path.
+fn build_exec_start(binary_path: &str, args: &[String]) -> String {
     if args.is_empty() {
-        format!("{} run", binary)
+        format!("{} run", binary_path)
     } else {
-        format!("{} run {}", binary, args.join(" "))
+        format!("{} run {}", binary_path, args.join(" "))
     }
 }
 
@@ -45,20 +43,15 @@ pub fn install(
     mqtt_username: &Option<String>,
     mqtt_password: &Option<String>,
 ) -> Result<()> {
-    // Copy binary to install dir
     let current_exe = std::env::current_exe()?;
-    let dest = format!("{}/{}", INSTALL_DIR, SERVICE_NAME);
-    println!("Copying binary to {}", dest);
-    fs::copy(&current_exe, &dest)?;
+    let binary_path = current_exe
+        .canonicalize()?
+        .to_string_lossy()
+        .to_string();
 
-    // Make sure it's executable
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        fs::set_permissions(&dest, fs::Permissions::from_mode(0o755))?;
-    }
+    println!("Using binary at {}", binary_path);
 
-    let exec_start = build_exec_start(run_args);
+    let exec_start = build_exec_start(&binary_path, run_args);
     let env_lines = build_env_lines(mqtt_username, mqtt_password);
 
     let service = format!(
@@ -91,7 +84,6 @@ pub fn install(
 
 pub fn uninstall() -> Result<()> {
     println!("Stopping service");
-    // Don't fail if the service isn't running
     let _ = systemctl(&["stop", SERVICE_NAME]);
 
     println!("Disabling service");
@@ -113,8 +105,8 @@ mod tests {
 
     #[test]
     fn exec_start_no_args() {
-        let result = build_exec_start(&[]);
-        assert_eq!(result, "/usr/local/bin/fan-controller run");
+        let result = build_exec_start("/opt/fan-controller", &[]);
+        assert_eq!(result, "/opt/fan-controller run");
     }
 
     #[test]
@@ -125,10 +117,10 @@ mod tests {
             "--kp".to_string(),
             "0.03".to_string(),
         ];
-        let result = build_exec_start(&args);
+        let result = build_exec_start("/opt/fan-controller", &args);
         assert_eq!(
             result,
-            "/usr/local/bin/fan-controller run --target-temp 50 --kp 0.03"
+            "/opt/fan-controller run --target-temp 50 --kp 0.03"
         );
     }
 
