@@ -80,7 +80,8 @@ impl MqttHandle {
             "identifiers": [&self.prefix],
             "name": format!("{} Fan Controller", self.hostname),
             "manufacturer": "absalon.dev",
-            "model": "Raspberry Pi PWM Fan Controller"
+            "model": "Raspberry Pi PWM Fan Controller",
+            "sw_version": env!("CARGO_PKG_VERSION"),
         })
     }
 

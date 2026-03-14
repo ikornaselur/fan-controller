@@ -55,6 +55,7 @@ pub fn fan_loop(
         None
     };
 
+    info!("fan-controller v{}", env!("CARGO_PKG_VERSION"));
     info!(
         "Starting PID fan control (target {}°C, Kp={}, Ki={}, Kd={}, samples={})",
         target_temp, kp, ki, kd, temp_samples
