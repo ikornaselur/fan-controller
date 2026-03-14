@@ -65,12 +65,7 @@ impl PidController {
     pub fn update(&mut self, temp: f32) -> PidOutput {
         let error = temp - self.target;
 
-        if error > 0.0 {
-            self.integral += error;
-        } else {
-            // Decay integral when below target to prevent overshoot oscillation
-            self.integral *= 0.95;
-        }
+        self.integral += error;
         let integral_limit = if self.ki > 0.0 { 1.0 / self.ki } else { 1000.0 };
         self.integral = self.integral.clamp(0.0, integral_limit);
 
