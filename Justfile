@@ -14,4 +14,4 @@ release:
 
 # Run tests
 test:
-    cargo test --lib
+    cargo test

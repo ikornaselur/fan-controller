@@ -1,11 +1,13 @@
 use anyhow::Result;
-use clap::Parser;
+use clap::{Parser, Subcommand};
 use fan_controller::{fan_loop, logger::Logger, pwm::Channel};
 use log::LevelFilter;
 use std::time::Duration;
 
+mod service;
+mod update;
+
 static LOGGER: Logger = Logger;
-static LOG_LEVELS: &[&str; 6] = &["TRACE", "DEBUG", "INFO", "WARN", "ERROR", "OFF"];
 
 const DEFAULT_CHANNEL: usize = 0;
 const DEFAULT_FREQUENCY: f64 = 25_000.0; // 25kHz for Noctua fans
@@ -20,52 +22,97 @@ const DEFAULT_KI: f32 = 0.001;
 const DEFAULT_KD: f32 = 0.01;
 
 #[derive(Parser, Debug)]
-#[clap(version, about)]
-struct Args {
-    /// The hardware PWM channel to control. Should be 0 or 1.
-    #[clap(short, long, validator = hardware_pwm_channel, default_value_t = DEFAULT_CHANNEL)]
+#[command(version, about)]
+struct Cli {
+    #[command(subcommand)]
+    command: Command,
+}
+
+#[derive(Subcommand, Debug)]
+enum Command {
+    /// Run the fan control loop
+    Run(RunArgs),
+    /// Install and enable the systemd service
+    Install(InstallArgs),
+    /// Stop, disable, and remove the systemd service
+    Uninstall,
+    /// Self-update from the latest GitHub release
+    Update,
+}
+
+#[derive(Parser, Debug)]
+struct RunArgs {
+    /// The hardware PWM channel to control (0 or 1)
+    #[arg(short, long, default_value_t = DEFAULT_CHANNEL, value_parser = parse_channel)]
     channel: usize,
 
-    /// PWM frequency to use, in Hz.
-    #[clap(short, long, default_value_t = DEFAULT_FREQUENCY)]
+    /// PWM frequency to use, in Hz
+    #[arg(short, long, default_value_t = DEFAULT_FREQUENCY)]
     frequency: f64,
 
-    /// The initial duty cycle to start at, from 0.0 to 1.0
-    #[clap(short, long, validator = duty_cycle_range, default_value_t = INITIAL_DUTY_CYCLE)]
+    /// The initial duty cycle to start at (0.0 to 1.0)
+    #[arg(short, long, default_value_t = INITIAL_DUTY_CYCLE, value_parser = parse_duty_cycle)]
     duty_cycle: f64,
 
     /// The path to read the temperature from
-    #[clap(short, long, default_value_t = TEMP_PATH.to_string())]
+    #[arg(short, long, default_value_t = TEMP_PATH.to_string())]
     temp_path: String,
 
     /// Time, in seconds, to sleep between checking temperature
-    #[clap(short, long, default_value_t = DEFAULT_SLEEP)]
+    #[arg(short, long, default_value_t = DEFAULT_SLEEP)]
     sleep: u64,
 
-    /// Log level
-    #[clap(short, long, validator = is_log_level, default_value_t = DEFAULT_LOG_LEVEL.to_string())]
+    /// Log level (TRACE, DEBUG, INFO, WARN, ERROR, OFF)
+    #[arg(short, long, default_value_t = DEFAULT_LOG_LEVEL.to_string(), value_parser = parse_log_level)]
     log_level: String,
 
-    /// Target temperature in °C
-    #[clap(long, default_value_t = DEFAULT_TARGET_TEMP)]
+    /// Target temperature in degrees C
+    #[arg(long, default_value_t = DEFAULT_TARGET_TEMP)]
     target_temp: f32,
 
     /// PID proportional gain
-    #[clap(long, default_value_t = DEFAULT_KP)]
+    #[arg(long, default_value_t = DEFAULT_KP)]
     kp: f32,
 
     /// PID integral gain
-    #[clap(long, default_value_t = DEFAULT_KI)]
+    #[arg(long, default_value_t = DEFAULT_KI)]
     ki: f32,
 
     /// PID derivative gain
-    #[clap(long, default_value_t = DEFAULT_KD)]
+    #[arg(long, default_value_t = DEFAULT_KD)]
     kd: f32,
 }
 
-fn main() -> Result<()> {
-    let args = Args::parse();
+#[derive(Parser, Debug)]
+struct InstallArgs {
+    /// Arguments to pass to the 'run' subcommand in the service file.
+    /// Example: -- --target-temp 50 --kp 0.03 --mqtt-broker 192.168.1.100
+    #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+    run_args: Vec<String>,
 
+    /// MQTT username to bake into the service file (as Environment= line)
+    #[arg(long)]
+    mqtt_username: Option<String>,
+
+    /// MQTT password to bake into the service file (as Environment= line)
+    #[arg(long)]
+    mqtt_password: Option<String>,
+}
+
+fn main() -> Result<()> {
+    let cli = Cli::parse();
+
+    match cli.command {
+        Command::Run(args) => run(args),
+        Command::Install(args) => {
+            service::install(&args.run_args, &args.mqtt_username, &args.mqtt_password)
+        }
+        Command::Uninstall => service::uninstall(),
+        Command::Update => update::update(),
+    }
+}
+
+fn run(args: RunArgs) -> Result<()> {
     let log_level = match args.log_level.as_str() {
         "TRACE" => LevelFilter::Trace,
         "DEBUG" => LevelFilter::Debug,
@@ -97,40 +144,27 @@ fn main() -> Result<()> {
         args.kp,
         args.ki,
         args.kd,
-    )?;
-
-    Ok(())
+    )
 }
 
-fn is_log_level(val: &str) -> Result<(), String> {
-    if LOG_LEVELS.iter().any(|&l| l == val) {
-        Ok(())
-    } else {
-        Err(
-            "Unknown log level.\nShould be one of: TRACE, DEBUG, INFO, WARN, ERROR, OFF"
-                .to_string(),
-        )
+fn parse_channel(s: &str) -> Result<usize, String> {
+    match s {
+        "0" | "1" => Ok(s.parse().unwrap()),
+        _ => Err("channel must be 0 or 1".to_string()),
     }
 }
 
-fn hardware_pwm_channel(val: &str) -> Result<(), String> {
-    match val {
-        "0" | "1" => Ok(()),
-        _ => Err("Value has to be either 0 or 1".to_string()),
+fn parse_duty_cycle(s: &str) -> Result<f64, String> {
+    let val: f64 = s.parse().map_err(|_| "unable to parse duty cycle")?;
+    if !(0.0..=1.0).contains(&val) {
+        return Err("duty cycle must be between 0.0 and 1.0".to_string());
     }
+    Ok(val)
 }
 
-fn duty_cycle_range(val: &str) -> Result<(), String> {
-    match val.parse::<f64>() {
-        Ok(duty_cycle) => {
-            if duty_cycle < 0.0 {
-                Err("Value can't be below 0.0".to_string())
-            } else if duty_cycle > 1.0 {
-                Err("Value can't be above 1.0".to_string())
-            } else {
-                Ok(())
-            }
-        }
-        Err(_) => Err("Unable to parse duty cycle".to_string()),
+fn parse_log_level(s: &str) -> Result<String, String> {
+    match s {
+        "TRACE" | "DEBUG" | "INFO" | "WARN" | "ERROR" | "OFF" => Ok(s.to_string()),
+        _ => Err("must be one of: TRACE, DEBUG, INFO, WARN, ERROR, OFF".to_string()),
     }
 }
