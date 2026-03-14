@@ -1,6 +1,6 @@
 [package]
 name = "fan-controller"
-version = "0.4.0-dev"
+version = "0.4.0"
 authors = ["Axel <dev@absalon.dev>"]
 description = "A fan controller for Raspberry Pi4, for controlling fans through the hardware PWM channels"
 repository = "https://github.com/ikornaselur/fan-controller"
@@ -13,6 +13,7 @@ anyhow = "1"
 clap = { version = "4", features = ["derive"] }
 ctrlc = { version = "3", features = ["termination"] }
 log = "0.4"
+rumqttc = "0.25"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 ureq = { version = "3", features = ["json"] }

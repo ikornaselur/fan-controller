@@ -2,13 +2,15 @@ use anyhow::Result;
 use log::{debug, info, warn};
 use pid::PidController;
 use pwm::{Channel, Pwm};
+use std::collections::VecDeque;
 use std::fs::read_to_string;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::{thread, time::Duration};
 
 pub mod logger;
-mod pid;
+pub mod mqtt;
+pub mod pid;
 pub mod pwm;
 
 /// Returns the current temperature in celsius
@@ -30,6 +32,8 @@ pub fn fan_loop(
     kp: f32,
     ki: f32,
     kd: f32,
+    mqtt_config: Option<mqtt::MqttConfig>,
+    temp_samples: usize,
 ) -> Result<()> {
     info!("Setting up ctrlc handler");
     let running = Arc::new(AtomicBool::new(true));
@@ -41,18 +45,47 @@ pub fn fan_loop(
 
     let pwm = Pwm::new(channel, frequency, initial_duty_cycle)?;
     let mut pid = PidController::new(target_temp, kp, ki, kd);
+    let mut temp_buffer: VecDeque<f32> = VecDeque::with_capacity(temp_samples);
+
+    let mut mqtt = if let Some(config) = mqtt_config {
+        let mut handle = mqtt::MqttHandle::new(config)?;
+        handle.publish_discovery(&pid)?;
+        Some(handle)
+    } else {
+        None
+    };
 
     info!(
-        "Starting PID fan control (target {}°C, Kp={}, Ki={}, Kd={})",
-        target_temp, kp, ki, kd
+        "Starting PID fan control (target {}°C, Kp={}, Ki={}, Kd={}, samples={})",
+        target_temp, kp, ki, kd, temp_samples
     );
     while running.load(Ordering::SeqCst) {
-        let temp = get_temp(temp_path.as_str())?;
-        let duty_cycle = pid.update(temp);
+        let raw_temp = get_temp(temp_path.as_str())?;
 
-        debug!("{:.1}°C → duty cycle {:.3}", temp, duty_cycle);
-        pwm.set_duty_cycle(duty_cycle)?;
-        thread::sleep(sleep);
+        if temp_buffer.len() >= temp_samples {
+            temp_buffer.pop_front();
+        }
+        temp_buffer.push_back(raw_temp);
+        let temp = temp_buffer.iter().sum::<f32>() / temp_buffer.len() as f32;
+
+        let output = pid.update(temp);
+
+        debug!("{:.1}°C → duty cycle {:.3}", temp, output.duty_cycle);
+        pwm.set_duty_cycle(output.duty_cycle)?;
+
+        if let Some(ref mut handle) = mqtt {
+            if let Err(e) = handle.publish_state(temp, &output) {
+                warn!("MQTT publish failed: {}", e);
+            }
+            handle.poll(sleep, &mut pid, &running);
+        } else {
+            thread::sleep(sleep);
+        }
+    }
+
+    if let Some(ref mut handle) = mqtt {
+        info!("Disconnecting MQTT");
+        handle.shutdown();
     }
 
     info!("Setting fan to 100% before exit");

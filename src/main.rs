@@ -1,8 +1,14 @@
 use anyhow::Result;
 use clap::{Parser, Subcommand};
-use fan_controller::{fan_loop, logger::Logger, pwm::Channel};
+use fan_controller::{fan_loop, logger::Logger, mqtt::MqttConfig, pwm::Channel};
 use log::LevelFilter;
 use std::time::Duration;
+
+fn gethostname() -> String {
+    std::fs::read_to_string("/etc/hostname")
+        .map(|s| s.trim().to_string())
+        .unwrap_or_else(|_| "unknown".to_string())
+}
 
 mod service;
 mod update;
@@ -81,6 +87,22 @@ struct RunArgs {
     /// PID derivative gain
     #[arg(long, default_value_t = DEFAULT_KD)]
     kd: f32,
+
+    /// Number of temperature readings to average (smooths sensor noise)
+    #[arg(long, default_value_t = 1)]
+    temp_samples: usize,
+
+    /// MQTT broker address (enables MQTT when set)
+    #[arg(long)]
+    mqtt_broker: Option<String>,
+
+    /// MQTT broker port
+    #[arg(long, default_value_t = 1883)]
+    mqtt_port: u16,
+
+    /// MQTT topic prefix (defaults to fan_controller_{hostname})
+    #[arg(long)]
+    mqtt_prefix: Option<String>,
 }
 
 #[derive(Parser, Debug)]
@@ -105,7 +127,9 @@ fn main() -> Result<()> {
     match cli.command {
         Command::Run(args) => run(args),
         Command::Install(args) => {
-            service::install(&args.run_args, &args.mqtt_username, &args.mqtt_password)
+            let mqtt_username = args.mqtt_username.or_else(|| std::env::var("MQTT_USERNAME").ok());
+            let mqtt_password = args.mqtt_password.or_else(|| std::env::var("MQTT_PASSWORD").ok());
+            service::install(&args.run_args, &mqtt_username, &mqtt_password)
         }
         Command::Uninstall => service::uninstall(),
         Command::Update => update::update(),
@@ -134,6 +158,21 @@ fn run(args: RunArgs) -> Result<()> {
 
     let sleep = Duration::from_secs(args.sleep);
 
+    let mqtt_config = args.mqtt_broker.map(|broker| {
+        let hostname = gethostname();
+        let prefix = args.mqtt_prefix.unwrap_or_else(|| {
+            format!("fan_controller_{}", hostname)
+        });
+        MqttConfig {
+            broker,
+            port: args.mqtt_port,
+            prefix,
+            hostname,
+            username: std::env::var("MQTT_USERNAME").ok(),
+            password: std::env::var("MQTT_PASSWORD").ok(),
+        }
+    });
+
     fan_loop(
         channel,
         args.frequency,
@@ -144,6 +183,8 @@ fn run(args: RunArgs) -> Result<()> {
         args.kp,
         args.ki,
         args.kd,
+        mqtt_config,
+        args.temp_samples,
     )
 }
 
