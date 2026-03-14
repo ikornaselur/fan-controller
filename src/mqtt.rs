@@ -33,7 +33,12 @@ impl MqttHandle {
         let client_id = format!("fan-controller-{}", config.hostname);
         let mut opts = MqttOptions::new(&client_id, &config.broker, config.port);
         opts.set_keep_alive(Duration::from_secs(30));
-        opts.set_last_will(LastWill::new(&status_topic, "offline", QoS::AtLeastOnce, true));
+        opts.set_last_will(LastWill::new(
+            &status_topic,
+            "offline",
+            QoS::AtLeastOnce,
+            true,
+        ));
 
         if let (Some(user), Some(pass)) = (&config.username, &config.password) {
             opts.set_credentials(user, pass);
@@ -42,7 +47,10 @@ impl MqttHandle {
         let (client, mut connection) = Client::new(opts, 64);
 
         // Drive the connection until we get a ConnAck
-        info!("Connecting to MQTT broker {}:{}", config.broker, config.port);
+        info!(
+            "Connecting to MQTT broker {}:{}",
+            config.broker, config.port
+        );
         let deadline = std::time::Instant::now() + Duration::from_secs(10);
         let mut connected = false;
 
@@ -78,7 +86,7 @@ impl MqttHandle {
     fn device_json(&self) -> serde_json::Value {
         json!({
             "identifiers": [&self.prefix],
-            "name": format!("{} Fan Controller", self.hostname),
+            "name": format!("{} fan controller", self.hostname),
             "manufacturer": "absalon.dev",
             "model": "Raspberry Pi PWM Fan Controller",
             "sw_version": env!("CARGO_PKG_VERSION"),
@@ -368,7 +376,10 @@ impl MqttHandle {
             if remaining.is_zero() {
                 break;
             }
-            match self.connection.recv_timeout(remaining.min(Duration::from_millis(100))) {
+            match self
+                .connection
+                .recv_timeout(remaining.min(Duration::from_millis(100)))
+            {
                 Ok(Ok(event)) => {
                     debug!("MQTT drain: {:?}", event);
                 }
