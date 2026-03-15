@@ -49,12 +49,13 @@ impl PidController {
 
     pub fn set_kp(&mut self, kp: f32) {
         self.kp = kp;
-        self.integral = 0.0;
     }
 
     pub fn set_ki(&mut self, ki: f32) {
+        // Recalculate integral limit for the new Ki and clamp
         self.ki = ki;
-        self.integral = 0.0;
+        let limit = if ki > 0.0 { 1.0 / ki } else { 1000.0 };
+        self.integral = self.integral.clamp(0.0, limit);
     }
 
     pub fn set_kd(&mut self, kd: f32) {
