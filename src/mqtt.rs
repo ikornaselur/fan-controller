@@ -6,9 +6,22 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
+use crate::config;
 use crate::pid::{PidController, PidOutput};
 
 const DISCOVERY_PREFIX: &str = "homeassistant";
+
+fn save_config(pid: &PidController) {
+    let cfg = config::Config {
+        target_temp: pid.target(),
+        kp: pid.kp(),
+        ki: pid.ki(),
+        kd: pid.kd(),
+    };
+    if let Err(e) = config::save(&cfg) {
+        warn!("Failed to save config: {}", e);
+    }
+}
 
 pub struct MqttConfig {
     pub broker: String,
@@ -352,7 +365,11 @@ impl MqttHandle {
 
             let recv_timeout = remaining.min(Duration::from_millis(100));
             match self.connection.recv_timeout(recv_timeout) {
-                Ok(Ok(event)) => self.handle_event(event, pid),
+                Ok(Ok(event)) => {
+                    if self.handle_event(event, pid) {
+                        save_config(pid);
+                    }
+                }
                 Ok(Err(e)) => {
                     error!("MQTT connection error: {}", e);
                     break;
@@ -392,77 +409,85 @@ impl MqttHandle {
         }
     }
 
-    fn handle_event(&self, event: Event, pid: &mut PidController) {
-        if let Event::Incoming(Packet::Publish(publish)) = event {
-            let topic = &publish.topic;
-            let payload = match std::str::from_utf8(&publish.payload) {
-                Ok(s) => s,
-                Err(_) => return,
-            };
+    /// Returns true if a config value was changed.
+    fn handle_event(&self, event: Event, pid: &mut PidController) -> bool {
+        let publish = match event {
+            Event::Incoming(Packet::Publish(p)) => p,
+            _ => return false,
+        };
 
-            debug!("MQTT command: {} = {}", topic, payload);
+        let topic = &publish.topic;
+        let payload = match std::str::from_utf8(&publish.payload) {
+            Ok(s) => s,
+            Err(_) => return false,
+        };
 
-            let suffix = match topic.strip_prefix(&format!("{}/", self.prefix)) {
-                Some(s) => s,
-                None => return,
-            };
+        debug!("MQTT command: {} = {}", topic, payload);
 
-            match suffix {
-                "target_temp/set" => {
-                    if let Ok(val) = payload.parse::<f32>() {
-                        info!("MQTT: setting target temp to {:.1}\u{00b0}C", val);
-                        pid.set_target(val);
-                        let _ = self.client.publish(
-                            format!("{}/target_temp/state", self.prefix),
-                            QoS::AtMostOnce,
-                            true,
-                            format!("{:.1}", val),
-                        );
-                    } else {
-                        warn!("MQTT: invalid target_temp value: {}", payload);
-                    }
+        let suffix = match topic.strip_prefix(&format!("{}/", self.prefix)) {
+            Some(s) => s,
+            None => return false,
+        };
+
+        match suffix {
+            "target_temp/set" => {
+                if let Ok(val) = payload.parse::<f32>() {
+                    info!("MQTT: setting target temp to {:.1}\u{00b0}C", val);
+                    pid.set_target(val);
+                    let _ = self.client.publish(
+                        format!("{}/target_temp/state", self.prefix),
+                        QoS::AtMostOnce,
+                        true,
+                        format!("{:.1}", val),
+                    );
+                    return true;
                 }
-                "kp/set" => {
-                    if let Ok(val) = payload.parse::<f32>() {
-                        info!("MQTT: setting Kp to {}", val);
-                        pid.set_kp(val);
-                        let _ = self.client.publish(
-                            format!("{}/kp/state", self.prefix),
-                            QoS::AtMostOnce,
-                            true,
-                            format!("{}", val),
-                        );
-                    }
-                }
-                "ki/set" => {
-                    if let Ok(val) = payload.parse::<f32>() {
-                        info!("MQTT: setting Ki to {}", val);
-                        pid.set_ki(val);
-                        let _ = self.client.publish(
-                            format!("{}/ki/state", self.prefix),
-                            QoS::AtMostOnce,
-                            true,
-                            format!("{}", val),
-                        );
-                    }
-                }
-                "kd/set" => {
-                    if let Ok(val) = payload.parse::<f32>() {
-                        info!("MQTT: setting Kd to {}", val);
-                        pid.set_kd(val);
-                        let _ = self.client.publish(
-                            format!("{}/kd/state", self.prefix),
-                            QoS::AtMostOnce,
-                            true,
-                            format!("{}", val),
-                        );
-                    }
-                }
-                _ => {
-                    debug!("MQTT: unknown command topic: {}", topic);
+                warn!("MQTT: invalid target_temp value: {}", payload);
+            }
+            "kp/set" => {
+                if let Ok(val) = payload.parse::<f32>() {
+                    info!("MQTT: setting Kp to {}", val);
+                    pid.set_kp(val);
+                    let _ = self.client.publish(
+                        format!("{}/kp/state", self.prefix),
+                        QoS::AtMostOnce,
+                        true,
+                        format!("{}", val),
+                    );
+                    return true;
                 }
             }
+            "ki/set" => {
+                if let Ok(val) = payload.parse::<f32>() {
+                    info!("MQTT: setting Ki to {}", val);
+                    pid.set_ki(val);
+                    let _ = self.client.publish(
+                        format!("{}/ki/state", self.prefix),
+                        QoS::AtMostOnce,
+                        true,
+                        format!("{}", val),
+                    );
+                    return true;
+                }
+            }
+            "kd/set" => {
+                if let Ok(val) = payload.parse::<f32>() {
+                    info!("MQTT: setting Kd to {}", val);
+                    pid.set_kd(val);
+                    let _ = self.client.publish(
+                        format!("{}/kd/state", self.prefix),
+                        QoS::AtMostOnce,
+                        true,
+                        format!("{}", val),
+                    );
+                    return true;
+                }
+            }
+            _ => {
+                debug!("MQTT: unknown command topic: {}", topic);
+            }
         }
+        false
     }
 
     fn publish_retained(&self, topic: &str, payload: &str) -> Result<()> {

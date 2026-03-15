@@ -1,6 +1,6 @@
 use anyhow::Result;
 use clap::{Parser, Subcommand};
-use fan_controller::{fan_loop, logger::Logger, mqtt::MqttConfig, pwm::Channel};
+use fan_controller::{config, fan_loop, logger::Logger, mqtt::MqttConfig, pwm::Channel};
 use log::LevelFilter;
 use std::time::Duration;
 
@@ -73,20 +73,20 @@ struct RunArgs {
     log_level: String,
 
     /// Target temperature in degrees C
-    #[arg(long, default_value_t = DEFAULT_TARGET_TEMP)]
-    target_temp: f32,
+    #[arg(long)]
+    target_temp: Option<f32>,
 
     /// PID proportional gain
-    #[arg(long, default_value_t = DEFAULT_KP)]
-    kp: f32,
+    #[arg(long)]
+    kp: Option<f32>,
 
     /// PID integral gain
-    #[arg(long, default_value_t = DEFAULT_KI)]
-    ki: f32,
+    #[arg(long)]
+    ki: Option<f32>,
 
     /// PID derivative gain
-    #[arg(long, default_value_t = DEFAULT_KD)]
-    kd: f32,
+    #[arg(long)]
+    kd: Option<f32>,
 
     /// Number of temperature readings to average (smooths sensor noise)
     #[arg(long, default_value_t = 1)]
@@ -151,6 +151,23 @@ fn run(args: RunArgs) -> Result<()> {
         .map(|()| log::set_max_level(log_level))
         .unwrap();
 
+    // Load saved config, then layer: CLI arg > config file > default
+    let saved = config::load().unwrap_or_else(|e| {
+        eprintln!("Warning: failed to load config: {}", e);
+        None
+    });
+
+    let target_temp = args.target_temp.or(saved.as_ref().map(|c| c.target_temp)).unwrap_or(DEFAULT_TARGET_TEMP);
+    let kp = args.kp.or(saved.as_ref().map(|c| c.kp)).unwrap_or(DEFAULT_KP);
+    let ki = args.ki.or(saved.as_ref().map(|c| c.ki)).unwrap_or(DEFAULT_KI);
+    let kd = args.kd.or(saved.as_ref().map(|c| c.kd)).unwrap_or(DEFAULT_KD);
+
+    // Save resolved config (persists CLI overrides)
+    let cfg = config::Config { target_temp, kp, ki, kd };
+    if let Err(e) = config::save(&cfg) {
+        eprintln!("Warning: failed to save config: {}", e);
+    }
+
     let channel = match args.channel {
         1 => Channel::Pwm1,
         _ => Channel::Pwm0,
@@ -179,10 +196,10 @@ fn run(args: RunArgs) -> Result<()> {
         args.duty_cycle,
         args.temp_path,
         sleep,
-        args.target_temp,
-        args.kp,
-        args.ki,
-        args.kd,
+        target_temp,
+        kp,
+        ki,
+        kd,
         mqtt_config,
         args.temp_samples,
     )
