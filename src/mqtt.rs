@@ -1,5 +1,5 @@
 use anyhow::{bail, Result};
-use log::{debug, error, info, warn};
+use log::{debug, info, warn};
 use rumqttc::{Client, Event, LastWill, MqttOptions, Packet, QoS};
 use serde_json::json;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -278,7 +278,7 @@ impl MqttHandle {
         self.publish_pid_state(pid)?;
 
         // Drain events to flush the queued publishes to the broker
-        self.drain_pending();
+        self.drain_events(Duration::from_secs(2));
 
         info!("MQTT discovery published, subscribed to commands");
         Ok(())
@@ -370,9 +370,11 @@ impl MqttHandle {
                         save_config(pid);
                     }
                 }
+                // Connection errors are expected during broker restarts.
+                // rumqttc handles reconnection internally — just log once and continue.
                 Ok(Err(e)) => {
-                    error!("MQTT connection error: {}", e);
-                    break;
+                    debug!("MQTT connection error (will retry): {}", e);
+                    continue;
                 }
                 Err(_timeout) => continue,
             }
@@ -382,29 +384,16 @@ impl MqttHandle {
     /// Disconnect and drain the connection so the process can exit.
     pub fn shutdown(&mut self) {
         let _ = self.client.disconnect();
-        self.drain_pending();
+        self.drain_events(Duration::from_millis(500));
     }
 
-    /// Drain pending events from the connection (up to 2 seconds).
-    fn drain_pending(&mut self) {
-        let deadline = std::time::Instant::now() + Duration::from_secs(2);
-        loop {
-            let remaining = deadline.saturating_duration_since(std::time::Instant::now());
-            if remaining.is_zero() {
-                break;
-            }
-            match self
-                .connection
-                .recv_timeout(remaining.min(Duration::from_millis(100)))
-            {
-                Ok(Ok(event)) => {
-                    debug!("MQTT drain: {:?}", event);
-                }
-                Ok(Err(e)) => {
-                    debug!("MQTT drain error: {}", e);
-                    break;
-                }
-                Err(_) => break,
+    /// Drain pending events for up to `timeout`.
+    fn drain_events(&mut self, timeout: Duration) {
+        let deadline = std::time::Instant::now() + timeout;
+        while std::time::Instant::now() < deadline {
+            match self.connection.recv_timeout(Duration::from_millis(100)) {
+                Ok(Ok(_)) => continue,
+                _ => break,
             }
         }
     }
