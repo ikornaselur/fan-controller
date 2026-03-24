@@ -106,11 +106,36 @@ impl MqttHandle {
         })
     }
 
-    /// Publish HA discovery configs and mark as online.
+    /// Publish HA discovery configs, subscribe, and mark as online.
     pub fn publish_discovery(&mut self, pid: &PidController) -> Result<()> {
+        self.setup_subscriptions_and_discovery(pid)?;
+
+        // Drain events to flush the queued publishes to the broker
+        self.drain_events(Duration::from_secs(2));
+
+        info!("MQTT discovery published, subscribed to commands");
+        Ok(())
+    }
+
+    /// Re-subscribe and re-publish everything after a reconnection.
+    fn republish(&self, pid: &PidController) -> Result<()> {
+        self.setup_subscriptions_and_discovery(pid)?;
+        info!("MQTT re-published discovery after reconnect");
+        Ok(())
+    }
+
+    /// Shared logic for initial connect and reconnect.
+    fn setup_subscriptions_and_discovery(&self, pid: &PidController) -> Result<()> {
         let device = self.device_json();
         let status_topic = format!("{}/status", self.prefix);
         let p = &self.prefix;
+
+        // Subscribe to command topics
+        self.client
+            .subscribe(format!("{}/+/set", p), QoS::AtLeastOnce)?;
+
+        // Publish online status
+        self.publish_retained(&status_topic, "online")?;
 
         // Temperature sensor
         self.publish_retained(
@@ -267,20 +292,9 @@ impl MqttHandle {
             .to_string(),
         )?;
 
-        // Subscribe to command topics
-        self.client
-            .subscribe(format!("{}/+/set", self.prefix), QoS::AtLeastOnce)?;
-
-        // Publish online status
-        self.publish_retained(&status_topic, "online")?;
-
-        // Publish current PID state so HA has initial values
+        // Publish current PID state
         self.publish_pid_state(pid)?;
 
-        // Drain events to flush the queued publishes to the broker
-        self.drain_events(Duration::from_secs(2));
-
-        info!("MQTT discovery published, subscribed to commands");
         Ok(())
     }
 
@@ -365,13 +379,19 @@ impl MqttHandle {
 
             let recv_timeout = remaining.min(Duration::from_millis(100));
             match self.connection.recv_timeout(recv_timeout) {
+                Ok(Ok(Event::Incoming(Packet::ConnAck(_)))) => {
+                    info!("MQTT reconnected, re-publishing discovery");
+                    if let Err(e) = self.republish(pid) {
+                        warn!("MQTT re-publish failed: {}", e);
+                    }
+                }
                 Ok(Ok(event)) => {
                     if self.handle_event(event, pid) {
                         save_config(pid);
                     }
                 }
                 // Connection errors are expected during broker restarts.
-                // rumqttc handles reconnection internally — just log once and continue.
+                // rumqttc handles reconnection internally — just continue.
                 Ok(Err(e)) => {
                     debug!("MQTT connection error (will retry): {}", e);
                     continue;
